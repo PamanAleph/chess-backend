@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"chess-backend/internal/adapters/http/auth"
+	"chess-backend/internal/adapters/http/game"
 	"chess-backend/internal/ports/services"
 
 	"github.com/gorilla/mux"
@@ -13,8 +14,9 @@ import (
 
 // Server represents the HTTP server
 type Server struct {
-	router      *mux.Router
-	authHandler *auth.Handler
+	router         *mux.Router
+	authHandler    *auth.Handler
+	gameHandler    *game.GameHandlers
 	authMiddleware *AuthMiddleware
 }
 
@@ -26,9 +28,16 @@ func NewServer(authService services.AuthService, gameService services.GameServic
 	authHandler := auth.NewHandler(authService)
 	authMiddleware := NewAuthMiddleware(authService)
 
+	// Create game handler if gameService is provided
+	var gameHandler *game.GameHandlers
+	if gameService != nil {
+		gameHandler = game.NewGameHandlers(gameService)
+	}
+
 	server := &Server{
 		router:         router,
 		authHandler:    authHandler,
+		gameHandler:    gameHandler,
 		authMiddleware: authMiddleware,
 	}
 
@@ -53,11 +62,12 @@ func (s *Server) setupRoutes() {
 	// Authentication routes (public)
 	s.authHandler.RegisterRoutes(api)
 
-	// Protected routes would go here
-	// Example:
-	// protected := api.PathPrefix("/protected").Subrouter()
-	// protected.Use(s.authMiddleware.RequireAuth)
-	// gameHandler.RegisterRoutes(protected)
+	// Protected game routes
+	if s.gameHandler != nil {
+		gameRoutes := api.PathPrefix("/game").Subrouter()
+		gameRoutes.Use(s.authMiddleware.RequireAuth)
+		s.registerGameRoutes(gameRoutes)
+	}
 
 	// Serve static files (if needed)
 	s.router.PathPrefix("/").Handler(http.FileServer(http.Dir("./static/"))).Methods("GET")
@@ -73,6 +83,25 @@ func (s *Server) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 // GetRouter returns the configured router
 func (s *Server) GetRouter() *mux.Router {
 	return s.router
+}
+
+// registerGameRoutes registers all game-related routes
+func (s *Server) registerGameRoutes(router *mux.Router) {
+	// Game management routes
+	router.HandleFunc("/create", s.gameHandler.CreateGameHandler).Methods("POST")
+	router.HandleFunc("/join/{gameId}", s.gameHandler.JoinGameHandler).Methods("POST")
+	router.HandleFunc("/{gameId}", s.gameHandler.GetGameHandler).Methods("GET")
+	router.HandleFunc("/{gameId}/move", s.gameHandler.MoveHandler).Methods("POST")
+	router.HandleFunc("/{gameId}/resign", s.gameHandler.ResignGameHandler).Methods("POST")
+	router.HandleFunc("/{gameId}/history", s.gameHandler.GetGameHistoryHandler).Methods("GET")
+
+	// Game listing routes
+	router.HandleFunc("/my-games", s.gameHandler.ListPlayerGamesHandler).Methods("GET")
+	router.HandleFunc("/waiting", s.gameHandler.ListWaitingGamesHandler).Methods("GET")
+	router.HandleFunc("/active", s.gameHandler.ListActiveGamesHandler).Methods("GET")
+
+	// Player stats route
+	router.HandleFunc("/stats", s.gameHandler.GetPlayerStatsHandler).Methods("GET")
 }
 
 // Start starts the HTTP server on the specified address
