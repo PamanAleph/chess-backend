@@ -14,6 +14,7 @@ import (
 	"chess-backend/internal/adapters/mongodb"
 	"chess-backend/internal/adapters/redis"
 	"chess-backend/internal/application/auth"
+	"chess-backend/internal/application/game"
 
 	"github.com/joho/godotenv"
 )
@@ -26,9 +27,19 @@ func main() {
 	}
 
 	// Initialize MongoDB client
+	mongoURI := getEnv("MONGODB_URI", "")
+	mongoDatabase := getEnv("MONGODB_DATABASE", "")
+	
+	if mongoURI == "" {
+		log.Fatal("MONGODB_URI environment variable is required")
+	}
+	if mongoDatabase == "" {
+		log.Fatal("MONGODB_DATABASE environment variable is required")
+	}
+	
 	mongoConfig := mongodb.Config{
-		URI:      getEnv("MONGODB_URI", ""),
-		Database: getEnv("MONGODB_DATABASE", ""),
+		URI:      mongoURI,
+		Database: mongoDatabase,
 		Timeout:  10 * time.Second,
 	}
 	mongoClient, err := mongodb.NewClient(mongoConfig)
@@ -42,9 +53,16 @@ func main() {
 	}()
 
 	// Initialize Redis client
+	redisAddr := getEnv("REDIS_HOST", "")
+	redisPassword := getEnv("REDIS_PASSWORD", "")
+	
+	if redisAddr == "" {
+		log.Fatal("REDIS_HOST environment variable is required")
+	}
+	
 	redisConfig := redis.Config{
-		Addr:     getEnv("REDIS_ADDR", ""),
-		Password: getEnv("REDIS_PASSWORD", ""),
+		Addr:     redisAddr,
+		Password: redisPassword,
 		DB:       0,
 		Timeout:  5 * time.Second,
 	}
@@ -61,12 +79,14 @@ func main() {
 	// Initialize repositories (Adapters)
 	userRepo := mongodb.NewUserRepository(mongoClient, mongoConfig.Database)
 	sessionRepo := redis.NewSessionRepository(redisClient)
+	gameRepo := mongodb.NewGameRepository(mongoClient.Database(mongoConfig.Database).Collection("games"))
 
 	// Initialize application services
 	authService := auth.NewAuthService(userRepo, sessionRepo)
+	gameService := game.NewGameService(gameRepo)
 
 	// Initialize HTTP server with dependency injection
-	server := httpAdapter.NewServer(authService, nil) // gameService will be added later
+	server := httpAdapter.NewServer(authService, gameService)
 	router := server.GetRouter()
 
 	// Get port from environment
